@@ -119,11 +119,19 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 // Initialize databases
+startupLogger.LogInformation("Starting database initialization...");
 await InitializeDatabases();
+startupLogger.LogInformation("Database initialization completed.");
 
 // Configure application
+startupLogger.LogInformation("Configuring application pipeline...");
 engineStarter.ConfigureApplication(app);
 
+// Add health check endpoint for Railway
+app.MapGet("/health", () => "OK");
+startupLogger.LogInformation("Health check endpoint configured at /health");
+
+startupLogger.LogInformation("Application startup completed. Starting web server...");
 // Run application
 app.Run();
 
@@ -135,15 +143,28 @@ async Task InitializeDatabases()
 {
     if (appContext.IsInstalled)
     {
-        var scopeAccessor = appContext.Services.Resolve<ILifetimeScopeAccessor>();
-        using (scopeAccessor.BeginContextAwareScope(out var scope))
+        try
         {
-            var initializer = scope.ResolveOptional<IDatabaseInitializer>();
-            if (initializer != null)
+            var scopeAccessor = appContext.Services.Resolve<ILifetimeScopeAccessor>();
+            using (scopeAccessor.BeginContextAwareScope(out var scope))
             {
-                var appLifetime = scope.ResolveOptional<IHostApplicationLifetime>();
-                await initializer.InitializeDatabasesAsync(appLifetime?.ApplicationStopping ?? CancellationToken.None);
+                var initializer = scope.ResolveOptional<IDatabaseInitializer>();
+                if (initializer != null)
+                {
+                    var appLifetime = scope.ResolveOptional<IHostApplicationLifetime>();
+                    using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2)); // 2 minute timeout
+                    var combinedToken = CancellationTokenSource.CreateLinkedTokenSource(
+                        cts.Token, 
+                        appLifetime?.ApplicationStopping ?? CancellationToken.None).Token;
+                    
+                    await initializer.InitializeDatabasesAsync(combinedToken);
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            startupLogger.LogError(ex, "Database initialization failed during startup");
+            throw; // Re-throw to fail fast
         }
     }
 }

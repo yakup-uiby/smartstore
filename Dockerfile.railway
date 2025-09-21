@@ -32,6 +32,10 @@ ENV ASPNETCORE_URLS="http://+:80"
 WORKDIR /app
 COPY --from=build /app/release/publish .
 
+# Copy startup script
+COPY start-railway.sh .
+RUN chmod +x start-railway.sh
+
 # Install wkhtmltopdf
 RUN apt update &&\
     apt -y install wget &&\
