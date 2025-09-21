@@ -70,9 +70,14 @@ builder.Host
     .UseSerilog(dispose: true);
 
 var startupLogger = new SerilogLoggerFactory(Log.Logger).CreateLogger("File");
+var startupStopwatch = System.Diagnostics.Stopwatch.StartNew();
+startupLogger.LogInformation("Application startup initiated at {StartTime}", DateTime.UtcNow);
+
 var appContext = new SmartApplicationContext(builder.Environment, configuration, startupLogger);
 var engine = EngineFactory.Create(appContext.AppConfiguration);
 var engineStarter = engine.Start(appContext);
+
+startupLogger.LogInformation("Engine started in {ElapsedMs}ms", startupStopwatch.ElapsedMilliseconds);
 
 // Configure RequestSizeLimit and RequestFormLimits
 if (appContext.AppConfiguration.MaxRequestBodySize != null)
@@ -118,22 +123,50 @@ app.Lifetime.ApplicationStarted.Register(() =>
     engineStarter = null;
 });
 
-// Initialize databases
-startupLogger.LogInformation("Starting database initialization...");
-await InitializeDatabases();
-startupLogger.LogInformation("Database initialization completed.");
-
-// Configure application
+// Configure application first (before database init)
 startupLogger.LogInformation("Configuring application pipeline...");
 engineStarter.ConfigureApplication(app);
 
-// Add health check endpoint for Railway
+// Add health check endpoints for Railway
 app.MapGet("/health", () => "OK");
-startupLogger.LogInformation("Health check endpoint configured at /health");
+app.MapGet("/health/ready", () => 
+{
+    // This endpoint will be available immediately
+    return "READY";
+});
+app.MapGet("/health/live", () => 
+{
+    // This endpoint indicates the app is alive and responding
+    return "ALIVE";
+});
+app.MapGet("/health/startup", () => 
+{
+    // This endpoint shows startup timing information
+    return $"STARTUP_TIME: {startupStopwatch.ElapsedMilliseconds}ms";
+});
+startupLogger.LogInformation("Health check endpoints configured at /health, /health/ready, /health/live, /health/startup");
+startupLogger.LogInformation("Application pipeline configured in {ElapsedMs}ms", startupStopwatch.ElapsedMilliseconds);
 
-startupLogger.LogInformation("Application startup completed. Starting web server...");
-// Run application
-app.Run();
+// Start the web server in background
+var appTask = Task.Run(() => app.Run());
+
+// Initialize databases in background (non-blocking)
+_ = Task.Run(async () =>
+{
+    try
+    {
+        startupLogger.LogInformation("Starting database initialization...");
+        await InitializeDatabases();
+        startupLogger.LogInformation("Database initialization completed.");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "Database initialization failed");
+    }
+});
+
+// Wait for the app to start
+await appTask;
 
 
 

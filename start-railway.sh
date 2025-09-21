@@ -11,13 +11,11 @@ echo "Starting Smartstore on Railway..."
 export ASPNETCORE_ENVIRONMENT=Production
 export ASPNETCORE_URLS=http://0.0.0.0:$PORT
 
-# Wait for database to be ready (if needed)
-if [ ! -z "$DATABASE_URL" ]; then
-    echo "Waiting for database connection..."
-    # Add a small delay to ensure database is ready
-    sleep 5
-fi
+# Optimize .NET runtime for faster startup
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+export DOTNET_EnableDiagnostics=0
+export DOTNET_UseSharedCompilation=false
 
-# Start the application
+# Start the application immediately
 echo "Starting Smartstore.Web application..."
 exec ./Smartstore.Web --urls http://0.0.0.0:$PORT
